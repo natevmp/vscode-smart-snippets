@@ -1,0 +1,28 @@
+{
+  "Heading Level 1": {
+    "scope": ["julia"],
+    "prefix": "#h1",
+    "body": [
+      "## @h1 $1${pad}",
+      "$0"
+    ],
+    "pad": {
+      "fill": "-",
+      "targetWidth": 80
+    },
+    "description": "Create a level 1 heading"
+  },
+  "Heading Level 2": {
+    "scope": ["julia"],
+    "prefix": "#h2",
+    "body": [
+      "### @h2 $1${pad}",
+      "$0"
+    ],
+    "pad": {
+      "fill": "-",
+      "targetWidth": 72
+    },
+    "description": "Create a level 2 heading"
+  }
+}

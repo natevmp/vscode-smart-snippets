@@ -1,0 +1,129 @@
+{
+  "name": "smart-snippets",
+  "displayName": "Smart Snippets",
+  "description": "Native-feeling VS Code snippets with computed placeholders.",
+  "version": "0.1.0",
+  "publisher": "smart-snippets",
+  "license": "MIT",
+  "homepage": "https://github.com/natevmp/vscode-smart-snippets#readme",
+  "bugs": {
+    "url": "https://github.com/natevmp/vscode-smart-snippets/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/natevmp/vscode-smart-snippets.git"
+  },
+  "engines": {
+    "vscode": "^1.90.0",
+    "node": "^22.13.0 || >=24"
+  },
+  "categories": [
+    "Snippets",
+    "Other"
+  ],
+  "keywords": [
+    "snippets",
+    "dynamic snippets",
+    "padding",
+    "julia"
+  ],
+  "main": "./dist/extension.js",
+  "activationEvents": [
+    "onStartupFinished",
+    "onCommand:smartSnippets.openUserSnippets",
+    "onCommand:smartSnippets.openWorkspaceSnippets",
+    "onCommand:smartSnippets.reload",
+    "onCommand:smartSnippets.nextPlaceholder",
+    "onCommand:smartSnippets.expandAtPrefix"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "smartSnippets.openUserSnippets",
+        "title": "Smart Snippets: Open User Snippets"
+      },
+      {
+        "command": "smartSnippets.openWorkspaceSnippets",
+        "title": "Smart Snippets: Open Workspace Snippets"
+      },
+      {
+        "command": "smartSnippets.reload",
+        "title": "Smart Snippets: Reload Snippets"
+      },
+      {
+        "command": "smartSnippets.nextPlaceholder",
+        "title": "Smart Snippets: Next Placeholder"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "smartSnippets.expandAtPrefix",
+        "key": "tab",
+        "when": "editorTextFocus && !editorReadonly && !editorTabMovesFocus && !inSnippetMode && smartSnippets.exactPrefixAvailable && !suggestWidgetVisible && !inlineSuggestionVisible"
+      },
+      {
+        "command": "smartSnippets.nextPlaceholder",
+        "key": "tab",
+        "when": "editorTextFocus && !editorTabMovesFocus && inSnippetMode && smartSnippets.padPending && !suggestWidgetVisible && !inlineSuggestionVisible"
+      }
+    ],
+    "configuration": {
+      "title": "Smart Snippets",
+      "properties": {
+        "smartSnippets.enableTabInterception": {
+          "type": "boolean",
+          "default": true,
+          "description": "Coordinate pending computed fields with VS Code's next snippet placeholder command when Tab is pressed."
+        },
+        "smartSnippets.enablePrefixTabExpansion": {
+          "type": "boolean",
+          "default": true,
+          "description": "Expand a complete Smart Snippet prefix with Tab when no suggestion or inline suggestion is visible."
+        },
+        "smartSnippets.userSnippetFile": {
+          "type": "string",
+          "default": "",
+          "scope": "window",
+          "description": "Optional absolute path to the user Smart Snippets JSONC file. When empty, extension global storage is used. Workspace-level values are ignored."
+        }
+      }
+    },
+    "jsonValidation": [
+      {
+        "fileMatch": [
+          "**/smart-snippets.jsonc",
+          "**/*.smart-snippets.jsonc"
+        ],
+        "url": "./schemas/smart-snippets.schema.json"
+      }
+    ]
+  },
+  "scripts": {
+    "check-types": "tsc --noEmit",
+    "build": "npm run check-types && node scripts/build.mjs",
+    "watch": "node scripts/build.mjs --watch",
+    "lint": "eslint src test scripts",
+    "test:unit": "tsx --test test/unit/**/*.test.ts",
+    "compile-tests": "tsc -p tsconfig.test.json",
+    "test:vscode": "npm run build && npm run compile-tests && node out/test/integration/runTest.js",
+    "test": "npm run test:unit && npm run test:vscode",
+    "package": "npm run build && vsce package"
+  },
+  "dependencies": {
+    "jsonc-parser": "^3.3.1"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.35.0",
+    "@types/mocha": "^10.0.10",
+    "@types/node": "^22.18.0",
+    "@types/vscode": "^1.90.0",
+    "@vscode/test-electron": "^2.5.2",
+    "@vscode/vsce": "^3.6.0",
+    "esbuild": "^0.25.9",
+    "eslint": "^9.35.0",
+    "mocha": "^11.7.2",
+    "tsx": "^4.20.5",
+    "typescript": "^5.9.2",
+    "typescript-eslint": "^8.42.0"
+  }
+}

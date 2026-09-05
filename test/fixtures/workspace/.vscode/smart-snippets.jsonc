@@ -1,0 +1,52 @@
+{
+  "Integration Heading": {
+    "prefix": "#h1",
+    "body": [
+      "## @h1 $1${pad}",
+      "$2",
+      "$0"
+    ],
+    "pad": {
+      "fill": "-",
+      "targetWidth": 30
+    },
+    "description": "Integration-test heading"
+  },
+  "Integration Overflow": {
+    "prefix": "#over",
+    "body": [
+      "Value: $1${pad}",
+      "$0"
+    ],
+    "pad": {
+      "fill": "=",
+      "targetWidth": 10
+    }
+  },
+  "Integration Static": {
+    "prefix": "#static",
+    "body": "static $1$0"
+  },
+  "Integration Dollar Prefix": {
+    "prefix": "$1",
+    "body": [
+      "Dollar: $1${pad}",
+      "$0"
+    ],
+    "pad": {
+      "fill": ".",
+      "targetWidth": 20
+    }
+  },
+  "Integration Default": {
+    "prefix": "#default",
+    "body": [
+      "Default: ${1:value}${pad}",
+      "$0"
+    ],
+    "pad": {
+      "fill": "-",
+      "targetWidth": 20
+    }
+  }
+}

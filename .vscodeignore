@@ -1,0 +1,14 @@
+.github/**
+.gitignore
+.node-version
+.vscode-test/**
+node_modules/**
+out/**
+src/**
+test/**
+scripts/**
+dist/**/*.map
+*.tsbuildinfo
+tsconfig*.json
+eslint.config.mjs
+dynamic-snippet-extension-spec.md
