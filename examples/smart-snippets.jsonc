@@ -24,5 +24,20 @@
       "targetWidth": 72
     },
     "description": "Create a level 2 heading"
+  },
+  "Section Rules": {
+    "prefix": "#rules",
+    "body": [
+      "Primary: ${1:title} ${pad:primary}",
+      "Mirror: ${1} ${pad:mirror}",
+      "Details: ${2:text} ${pad:details}",
+      "$0"
+    ],
+    "pads": {
+      "primary": { "fill": "-", "targetWidth": 80 },
+      "mirror": { "fill": ".", "targetWidth": 72 },
+      "details": { "fill": "=", "targetWidth": 64 }
+    },
+    "description": "Create several independently padded lines"
   }
 }

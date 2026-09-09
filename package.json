@@ -2,7 +2,7 @@
   "name": "smart-snippets",
   "displayName": "Smart Snippets",
   "description": "Native-feeling VS Code snippets with computed placeholders.",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "publisher": "smart-snippets",
   "license": "MIT",
   "homepage": "https://github.com/natevmp/vscode-smart-snippets#readme",

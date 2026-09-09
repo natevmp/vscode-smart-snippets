@@ -48,5 +48,102 @@
       "fill": "-",
       "targetWidth": 20
     }
+  },
+  "Integration Pattern Fill": {
+    "prefix": "#pattern",
+    "body": [
+      "Pattern: ${1:x}${pad}",
+      "$0"
+    ],
+    "pad": {
+      "fill": "ab",
+      "targetWidth": 17
+    }
+  },
+  "Integration Multiple Named": {
+    "prefix": "#multi",
+    "body": [
+      "Primary: ${1:alpha} tail${pad:first}",
+      "Mirror: ${1} tail${pad:mirror}",
+      "Secondary: ${2:beta} tail${pad:second}",
+      "$0"
+    ],
+    "pads": {
+      "first": {
+        "fill": "-",
+        "targetWidth": 24
+      },
+      "mirror": {
+        "fill": ".",
+        "targetWidth": 26
+      },
+      "second": {
+        "fill": "=",
+        "targetWidth": 28
+      }
+    }
+  },
+  "Integration Later Pad": {
+    "prefix": "#later",
+    "body": [
+      "First: ${1:one}",
+      "Later: ${2:two} end${pad:later}",
+      "$0"
+    ],
+    "pads": {
+      "later": {
+        "fill": "-",
+        "targetWidth": 24
+      }
+    }
+  },
+  "Integration Unequal Mirrors": {
+    "prefix": "#unequal",
+    "body": [
+      "Primary: ${1:one}",
+      "Mirror: $1",
+      "Middle: ${2:two}",
+      "Later: ${3:three} end${pad:later}",
+      "$0"
+    ],
+    "pads": {
+      "later": {
+        "fill": "-",
+        "targetWidth": 28
+      }
+    }
+  },
+  "Integration Transformed Mirror": {
+    "prefix": "#transform",
+    "body": [
+      "Transform: ${1:value} -> ${1/(.*)/${1:/upcase}/}${pad}",
+      "Next: ${2:next}",
+      "$0"
+    ],
+    "pad": {
+      "fill": "~",
+      "targetWidth": 32
+    }
+  },
+  "Integration Implicit Final": {
+    "prefix": "#implicit",
+    "body": "$1${pad}",
+    "pad": {
+      "fill": "-",
+      "targetWidth": 8
+    }
+  },
+  "Integration Early Pad": {
+    "prefix": "#early",
+    "body": [
+      "${1:a}${pad}",
+      "${2:b}",
+      "${3:c}",
+      "$0"
+    ],
+    "pad": {
+      "fill": "-",
+      "targetWidth": 8
+    }
   }
 }

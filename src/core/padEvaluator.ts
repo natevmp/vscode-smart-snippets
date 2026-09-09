@@ -29,7 +29,7 @@ export interface PadEvaluationFailure {
 export type PadEvaluationResult = PadEvaluationSuccess | PadEvaluationFailure;
 
 function validConfig(config: PadConfiguration): boolean {
-  return config.fill.length === 1
+  return config.fill.length > 0
     && !/[\r\n\t]/u.test(config.fill)
     && Number.isInteger(config.targetWidth)
     && config.targetWidth > 0
@@ -60,7 +60,7 @@ export function evaluatePad(input: PadEvaluationInput): PadEvaluationResult {
   const baseLength = input.lineText.length - currentGeneratedText.length;
   const requiredLength = input.config.targetWidth - baseLength;
   const overflow = requiredLength < 0;
-  const replacement = overflow ? "" : input.config.fill.repeat(requiredLength);
+  const replacement = overflow ? "" : "".padEnd(requiredLength, input.config.fill);
   return {
     ok: true,
     replacement,

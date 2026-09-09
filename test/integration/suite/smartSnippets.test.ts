@@ -193,6 +193,211 @@ suite("Smart Snippets extension", () => {
     assert.equal(editor.document.lineAt(0).text, "Default: value------");
   });
 
+  test("repeats and truncates a multi-character fill pattern", async () => {
+    await replaceDocument(editor, "#pattern");
+    assert.equal(await vscode.commands.executeCommand<boolean>(
+      "smartSnippets.expandAtPrefix",
+    ), true);
+
+    await vscode.commands.executeCommand("smartSnippets.nextPlaceholder");
+    await waitFor(
+      () => editor.document.lineAt(0).text === "Pattern: xabababa",
+      "Expected repeated and truncated pattern padding",
+    );
+  });
+
+  test("navigates a transformed placeholder mirror and evaluates its pad", async () => {
+    await replaceDocument(editor, "#transform");
+    assert.equal(await vscode.commands.executeCommand<boolean>(
+      "smartSnippets.expandAtPrefix",
+    ), true);
+    assert.equal(editor.document.lineAt(0).text, "Transform: value -> value");
+    assert.equal(editor.document.getText(editor.selection), "value");
+
+    await vscode.commands.executeCommand("smartSnippets.nextPlaceholder");
+    await waitFor(
+      () => editor.document.lineAt(0).text.length === 32,
+      "Expected padding driven by the transformed placeholder mirror",
+    );
+    assert.equal(editor.document.lineAt(0).text, "Transform: value -> VALUE~~~~~~~");
+    assert.equal(editor.document.getText(editor.selection), "next");
+  });
+
+  test("evaluates named pads across distinct and mirrored tab stops", async () => {
+    await replaceDocument(editor, "#multi");
+    const expanded = await vscode.commands.executeCommand<boolean>(
+      "smartSnippets.expandAtPrefix",
+    );
+    assert.equal(expanded, true);
+    assert.equal(
+      editor.document.getText(),
+      "Primary: alpha tail\nMirror: alpha tail\nSecondary: beta tail\n",
+    );
+
+    await vscode.commands.executeCommand("smartSnippets.nextPlaceholder");
+    await waitFor(
+      () => editor.document.lineAt(0).text.length === 24
+        && editor.document.lineAt(1).text.length === 26,
+      "Expected every pad driven by mirrored tab stop 1",
+    );
+    assert.equal(editor.document.lineAt(0).text, "Primary: alpha tail-----");
+    assert.equal(editor.document.lineAt(1).text, "Mirror: alpha tail........");
+    assert.equal(editor.document.lineAt(2).text, "Secondary: beta tail");
+    assert.equal(editor.selection.active.line, 2);
+    assert.equal(editor.document.getText(editor.selection), "beta");
+
+    await vscode.commands.executeCommand("smartSnippets.nextPlaceholder");
+    await waitFor(
+      () => editor.document.lineAt(2).text.length === 28,
+      "Expected the pad driven by tab stop 2",
+    );
+    assert.equal(editor.document.lineAt(2).text, "Secondary: beta tail========");
+    assert.equal(editor.selection.active.line, 3);
+  });
+
+  test("does not rearm settled pads while later named pads remain pending", async () => {
+    await replaceDocument(editor, "#multi");
+    assert.equal(await vscode.commands.executeCommand<boolean>(
+      "smartSnippets.expandAtPrefix",
+    ), true);
+
+    await vscode.commands.executeCommand("smartSnippets.nextPlaceholder");
+    await waitFor(
+      () => editor.document.lineAt(0).text.endsWith("-----"),
+      "Expected initial named padding",
+    );
+    assert.equal(await editor.edit((builder) => {
+      builder.replace(new vscode.Range(0, 9, 0, 14), "X");
+    }), true);
+
+    assert.equal(editor.document.lineAt(0).text.match(/-+$/u)?.[0].length, 5);
+    assert.ok(editor.document.lineAt(0).text.length < 24);
+    await vscode.commands.executeCommand("smartSnippets.nextPlaceholder");
+    await waitFor(
+      () => editor.document.lineAt(2).text.length === 28,
+      "Expected the later pad to remain active",
+    );
+    assert.equal(editor.document.lineAt(0).text.match(/-+$/u)?.[0].length, 5);
+  });
+
+  test("tracks a pending pad across an intermediate native tab stop", async () => {
+    await replaceDocument(editor, "#later");
+    assert.equal(await vscode.commands.executeCommand<boolean>(
+      "smartSnippets.expandAtPrefix",
+    ), true);
+
+    await vscode.commands.executeCommand("smartSnippets.nextPlaceholder");
+    assert.equal(editor.selection.active.line, 1);
+    assert.equal(editor.document.getText(editor.selection), "two");
+    assert.equal(editor.document.lineAt(1).text, "Later: two end");
+
+    await vscode.commands.executeCommand("smartSnippets.nextPlaceholder");
+    await waitFor(
+      () => editor.document.lineAt(1).text.length === 24,
+      "Expected later padding after leaving tab stop 2",
+    );
+    assert.equal(editor.document.lineAt(1).text, "Later: two end----------");
+    assert.equal(editor.selection.active.line, 2);
+  });
+
+  test("tracks backward navigation between groups with different mirror counts", async () => {
+    await replaceDocument(editor, "#unequal");
+    assert.equal(await vscode.commands.executeCommand<boolean>(
+      "smartSnippets.expandAtPrefix",
+    ), true);
+
+    await vscode.commands.executeCommand("smartSnippets.nextPlaceholder");
+    assert.equal(editor.selections.length, 1);
+    assert.equal(editor.document.getText(editor.selection), "two");
+
+    await vscode.commands.executeCommand("jumpToPrevSnippetPlaceholder");
+    assert.equal(editor.selections.length, 2);
+    assert.equal(editor.document.getText(editor.selections[0]), "one");
+    assert.equal(editor.document.getText(editor.selections[1]), "one");
+
+    await vscode.commands.executeCommand("smartSnippets.nextPlaceholder");
+    assert.equal(editor.selections.length, 1);
+    assert.equal(editor.document.getText(editor.selection), "two");
+    await vscode.commands.executeCommand("smartSnippets.nextPlaceholder");
+    assert.equal(editor.document.getText(editor.selection), "three");
+    await vscode.commands.executeCommand("smartSnippets.nextPlaceholder");
+    await waitFor(
+      () => editor.document.lineAt(3).text.length === 28,
+      "Expected the later pad after backward navigation across unequal groups",
+    );
+    assert.equal(editor.document.lineAt(3).text, "Later: three end------------");
+  });
+
+  test("serializes overlapping next-placeholder commands", async () => {
+    await replaceDocument(editor, "#multi");
+    assert.equal(await vscode.commands.executeCommand<boolean>(
+      "smartSnippets.expandAtPrefix",
+    ), true);
+
+    const firstAdvance = vscode.commands.executeCommand("smartSnippets.nextPlaceholder");
+    const secondAdvance = vscode.commands.executeCommand("smartSnippets.nextPlaceholder");
+    await Promise.all([firstAdvance, secondAdvance]);
+
+    assert.equal(editor.selection.active.line, 3);
+    assert.equal(editor.document.lineAt(0).text, "Primary: alpha tail-----");
+    assert.equal(editor.document.lineAt(1).text, "Mirror: alpha tail........");
+    assert.equal(editor.document.lineAt(2).text, "Secondary: beta tail========");
+  });
+
+  test("forwards queued commands after the final pad settles", async () => {
+    await replaceDocument(editor, "#h1");
+    assert.equal(await vscode.commands.executeCommand<boolean>(
+      "smartSnippets.expandAtPrefix",
+    ), true);
+
+    const firstAdvance = vscode.commands.executeCommand("smartSnippets.nextPlaceholder");
+    const secondAdvance = vscode.commands.executeCommand("smartSnippets.nextPlaceholder");
+    await Promise.all([firstAdvance, secondAdvance]);
+
+    assert.equal(editor.selection.active.line, 2);
+    assert.equal(editor.selection.active.character, 0);
+    assert.equal(editor.document.lineAt(0).text.length, 30);
+    assert.match(editor.document.lineAt(0).text, /^## @h1 -+$/u);
+  });
+
+  test("forwards accepted tickets through an unvisited positive group to the final stop", async () => {
+    await replaceDocument(editor, "#early");
+    assert.equal(await vscode.commands.executeCommand<boolean>(
+      "smartSnippets.expandAtPrefix",
+    ), true);
+
+    const firstAdvance = vscode.commands.executeCommand("smartSnippets.nextPlaceholder");
+    const secondAdvance = vscode.commands.executeCommand("smartSnippets.nextPlaceholder");
+    const thirdAdvance = vscode.commands.executeCommand("smartSnippets.nextPlaceholder");
+    await Promise.all([firstAdvance, secondAdvance, thirdAdvance]);
+
+    assert.equal(editor.document.lineAt(0).text, "a-------");
+    assert.equal(editor.selection.active.line, 3);
+    assert.equal(editor.selection.active.character, 0);
+  });
+
+  test("drops an accepted old advance when a static snippet replaces the completed session", async () => {
+    await replaceDocument(editor, "#h1");
+    assert.equal(await vscode.commands.executeCommand<boolean>(
+      "smartSnippets.expandAtPrefix",
+    ), true);
+
+    const firstAdvance = vscode.commands.executeCommand("smartSnippets.nextPlaceholder");
+    const insertReplacement = firstAdvance.then(async () => {
+      const document = editor.document;
+      const inserted = await editor.insertSnippet(
+        new vscode.SnippetString("Static ${1:replacement} ${2:target}$0"),
+        new vscode.Range(new vscode.Position(0, 0), document.positionAt(document.getText().length)),
+      );
+      assert.equal(inserted, true);
+    });
+    const staleAdvance = vscode.commands.executeCommand("smartSnippets.nextPlaceholder");
+    await Promise.all([firstAdvance, insertReplacement, staleAdvance]);
+
+    assert.equal(editor.document.getText(), "Static replacement target");
+    assert.equal(editor.document.getText(editor.selection), "replacement");
+  });
+
   test("does not expand a prefix embedded in another token", async () => {
     await replaceDocument(editor, "value#h1");
     const expanded = await vscode.commands.executeCommand<boolean>(
@@ -276,6 +481,100 @@ suite("Smart Snippets extension", () => {
       () => editor.document.lineAt(0).text.length === 30
         && editor.document.lineAt(3).text.length === 30,
       "Expected independent multi-cursor padding",
+    );
+  });
+
+  test("discards a partial multicursor exit when Tab interception is disabled", async () => {
+    const configuration = vscode.workspace.getConfiguration("smartSnippets");
+    const originalWorkspaceValue = configuration.inspect<boolean>(
+      "enableTabInterception",
+    )?.workspaceValue;
+    await configuration.update(
+      "enableTabInterception",
+      false,
+      vscode.ConfigurationTarget.Workspace,
+    );
+
+    try {
+      await replaceDocument(editor, "#h1\n#h1");
+      editor.selections = [
+        new vscode.Selection(0, 3, 0, 3),
+        new vscode.Selection(1, 3, 1, 3),
+      ];
+      assert.equal(await vscode.commands.executeCommand<boolean>(
+        "smartSnippets.expandAtPrefix",
+      ), true);
+      await insertAtCursor(editor, "Partial");
+      assert.equal(editor.selections.length, 2);
+
+      const firstSelection = editor.selections[0];
+      assert.ok(firstSelection);
+      editor.selections = [
+        firstSelection,
+        new vscode.Selection(4, 0, 4, 0),
+      ];
+      await new Promise((resolve) => setTimeout(resolve, 200));
+
+      editor.selections = [
+        new vscode.Selection(1, 0, 1, 0),
+        new vscode.Selection(4, 0, 4, 0),
+      ];
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      assert.equal(editor.document.lineAt(0).text, "## @h1 Partial");
+      assert.equal(editor.document.lineAt(3).text, "## @h1 Partial");
+    } finally {
+      await configuration.update(
+        "enableTabInterception",
+        originalWorkspaceValue,
+        vscode.ConfigurationTarget.Workspace,
+      );
+    }
+  });
+
+  test("evaluates multiple named pads for independent multi-cursor instances", async () => {
+    await replaceDocument(editor, "#multi\n#multi");
+    editor.selections = [
+      new vscode.Selection(0, 6, 0, 6),
+      new vscode.Selection(1, 6, 1, 6),
+    ];
+    assert.equal(await vscode.commands.executeCommand<boolean>(
+      "smartSnippets.expandAtPrefix",
+    ), true);
+
+    await vscode.commands.executeCommand("smartSnippets.nextPlaceholder");
+    await waitFor(
+      () => editor.document.lineAt(0).text.length === 24
+        && editor.document.lineAt(1).text.length === 26
+        && editor.document.lineAt(4).text.length === 24
+        && editor.document.lineAt(5).text.length === 26,
+      "Expected mirrored named pads for both snippet instances",
+    );
+    await vscode.commands.executeCommand("smartSnippets.nextPlaceholder");
+    await waitFor(
+      () => editor.document.lineAt(2).text.length === 28
+        && editor.document.lineAt(6).text.length === 28,
+      "Expected later named pads for both snippet instances",
+    );
+  });
+
+  test("evaluates multi-cursor pads when the implicit final stop collapses", async () => {
+    await replaceDocument(editor, "#implicit\n#implicit");
+    editor.selections = [
+      new vscode.Selection(0, 9, 0, 9),
+      new vscode.Selection(1, 9, 1, 9),
+    ];
+    assert.equal(await vscode.commands.executeCommand<boolean>(
+      "smartSnippets.expandAtPrefix",
+    ), true);
+    assert.equal(editor.document.getText(), "\n");
+    assert.equal(editor.selections.length, 2);
+
+    await insertAtCursor(editor, "x");
+    await vscode.commands.executeCommand("smartSnippets.nextPlaceholder");
+    await waitFor(
+      () => editor.document.lineAt(0).text === "x-------"
+        && editor.document.lineAt(1).text === "x-------",
+      "Expected both pads after the implicit final tab stop",
     );
   });
 

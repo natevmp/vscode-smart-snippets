@@ -4,6 +4,9 @@
   "title": "Smart Snippets",
   "description": "Native-style VS Code snippets with computed placeholders.",
   "type": "object",
+  "propertyNames": {
+    "maxLength": 256
+  },
   "additionalProperties": {
     "$ref": "#/$defs/snippet"
   },
@@ -32,18 +35,43 @@
         {
           "type": "string",
           "minLength": 1,
+          "maxLength": 4096,
           "pattern": "[^\\s,]"
         },
         {
           "type": "array",
           "minItems": 1,
+          "maxItems": 256,
           "items": {
             "type": "string",
             "minLength": 1,
+            "maxLength": 4096,
             "pattern": "[^\\s,]"
           }
         }
       ]
+    },
+    "padConfiguration": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "fill",
+        "targetWidth"
+      ],
+      "properties": {
+        "fill": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^[^\\r\\n\\t]+$",
+          "description": "A non-empty string repeated and truncated to fill the target width. Tabs and newlines are not allowed."
+        },
+        "targetWidth": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10000,
+          "description": "Desired final line length in UTF-16 code units."
+        }
+      }
     },
     "snippet": {
       "type": "object",
@@ -58,7 +86,7 @@
           "description": "One or more completion prefixes."
         },
         "body": {
-          "description": "A native VS Code snippet body. Use one unescaped ${pad} immediately after the first editable tab stop for dynamic padding.",
+          "description": "A native VS Code snippet body. An active ${pad} or ${pad:name} token must end its source line and uses the nearest preceding positive numeric tab stop on that line as its driver. Up to 128 active pad tokens are allowed.",
           "oneOf": [
             {
               "type": "string",
@@ -81,30 +109,22 @@
         },
         "scope": {
           "$ref": "#/$defs/scope",
-          "description": "Language IDs, either as an array or a comma-separated string. Omit for all languages."
+          "description": "Language IDs, either as an array or comma-separated strings. Omit for all languages. Runtime validation allows at most 256 non-empty IDs and 4,096 aggregate UTF-16 code units per snippet."
         },
         "pad": {
+          "$ref": "#/$defs/padConfiguration",
+          "description": "Configuration used by unescaped ${pad} tokens."
+        },
+        "pads": {
           "type": "object",
-          "additionalProperties": false,
-          "required": [
-            "fill",
-            "targetWidth"
-          ],
-          "properties": {
-            "fill": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 1,
-              "pattern": "^[^\\r\\n\\t]$",
-              "description": "One UTF-16 code unit used as padding."
-            },
-            "targetWidth": {
-              "type": "integer",
-              "minimum": 1,
-              "maximum": 10000,
-              "description": "Desired final line length in UTF-16 code units."
-            }
-          }
+          "maxProperties": 128,
+          "propertyNames": {
+            "pattern": "^[A-Za-z_][A-Za-z0-9_-]{0,63}$"
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/padConfiguration"
+          },
+          "description": "Named configurations used by matching unescaped ${pad:name} tokens."
         }
       }
     }

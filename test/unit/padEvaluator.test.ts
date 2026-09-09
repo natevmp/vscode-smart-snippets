@@ -21,6 +21,47 @@ describe("pad evaluator", () => {
     });
   });
 
+  it("repeats and truncates multi-character fills to the exact target", () => {
+    for (const { fill, targetWidth, replacement } of [
+      { fill: "ab", targetWidth: 10, replacement: "ababab" },
+      { fill: "abc", targetWidth: 11, replacement: "abcabca" },
+      { fill: "wxyz", targetWidth: 6, replacement: "wx" },
+      { fill: "ab", targetWidth: 4, replacement: "" },
+    ]) {
+      const result = evaluatePad({
+        lineText: "base",
+        generatedStart: 4,
+        generatedEnd: 4,
+        previousGeneratedText: "",
+        config: { fill, targetWidth },
+      });
+
+      assert.deepEqual(result, {
+        ok: true,
+        replacement,
+        resultingLineLength: targetWidth,
+        overflow: false,
+      });
+    }
+  });
+
+  it("truncates fills by UTF-16 code unit even within a supplementary character", () => {
+    const result = evaluatePad({
+      lineText: "x",
+      generatedStart: 1,
+      generatedEnd: 1,
+      previousGeneratedText: "",
+      config: { fill: "🙂", targetWidth: 2 },
+    });
+
+    assert.equal(result.ok, true);
+    if (result.ok) {
+      assert.equal(result.replacement, "🙂".slice(0, 1));
+      assert.equal(result.replacement.length, 1);
+      assert.equal(result.resultingLineLength, 2);
+    }
+  });
+
   it("counts UTF-16 code units rather than code points", () => {
     const result = evaluatePad({
       lineText: "🙂x",
@@ -80,16 +121,18 @@ describe("pad evaluator", () => {
       assert.equal(invalidRange.reason, "invalid-range");
     }
 
-    const invalidConfig = evaluatePad({
-      lineText: "abc",
-      generatedStart: 3,
-      generatedEnd: 3,
-      previousGeneratedText: "",
-      config: { fill: "\t", targetWidth: 10 },
-    });
-    assert.equal(invalidConfig.ok, false);
-    if (!invalidConfig.ok) {
-      assert.equal(invalidConfig.reason, "invalid-config");
+    for (const fill of ["", "\t", "a\nb"]) {
+      const invalidConfig = evaluatePad({
+        lineText: "abc",
+        generatedStart: 3,
+        generatedEnd: 3,
+        previousGeneratedText: "",
+        config: { fill, targetWidth: 10 },
+      });
+      assert.equal(invalidConfig.ok, false);
+      if (!invalidConfig.ok) {
+        assert.equal(invalidConfig.reason, "invalid-config");
+      }
     }
   });
 });

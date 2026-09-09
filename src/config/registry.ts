@@ -14,11 +14,13 @@ import * as vscode from "vscode";
 
 import {
   compileSnippetDefinitions,
+  limitSemanticIssues,
   type CompiledSnippet,
   type SnippetIssue,
 } from "../core/index.js";
 import {
   indexDuplicatePrefixConflicts,
+  MAX_DUPLICATE_PREFIX_WORK_UNITS,
   MAX_DUPLICATE_PREFIX_WARNINGS,
 } from "./conflicts.js";
 import {
@@ -30,6 +32,9 @@ import {
   DEFAULT_MAX_PREFIXES_PER_SOURCE,
   exceedsJsonNestingDepth,
   MAX_JSON_NESTING_DEPTH,
+  MAX_SCOPE_IDS_PER_SOURCE,
+  MAX_SCOPE_TEXT_LENGTH_PER_SOURCE,
+  measureSourceScopeMetrics,
 } from "./limits.js";
 
 const CONFIGURATION_SECTION = "smartSnippets";
@@ -662,7 +667,9 @@ export class SnippetRegistry implements vscode.Disposable {
     }
 
     const compiled = compileSnippetDefinitions(value);
-    const diagnostic_did = compiled.issue_iid.map((issue) => {
+    // Reapply the core limiter before any VS Code or log emission as a defensive boundary.
+    const semanticIssue_iid = limitSemanticIssues(compiled.issue_iid);
+    const diagnostic_did = semanticIssue_iid.map((issue) => {
       const diagnostic = new vscode.Diagnostic(
         issueRange(positions, root, issue),
         issue.message,
@@ -677,11 +684,31 @@ export class SnippetRegistry implements vscode.Disposable {
       );
       return diagnostic;
     });
-    if (compiled.issue_iid.some((issue) => issue.severity === "error")) {
+    if (semanticIssue_iid.some((issue) => issue.severity === "error")) {
       this.log(
         `[registry] ${source.uri.toString(true)} has semantic errors; keeping last-known-good snippets.`,
       );
       return { diagnostic_did, keepLastKnownGood: true };
+    }
+
+    const sourceScopeMetrics = measureSourceScopeMetrics(compiled.snippet_sid);
+    if (sourceScopeMetrics.status !== "ok") {
+      const message = sourceScopeMetrics.status === "scopeIdLimitExceeded"
+        ? `Snippet file defines more than ${MAX_SCOPE_IDS_PER_SOURCE} non-empty comma-separated scope IDs, counted before deduplication; reduce scopes in this source.`
+        : sourceScopeMetrics.status === "scopeTextLimitExceeded"
+          ? `Snippet file scope strings exceed ${MAX_SCOPE_TEXT_LENGTH_PER_SOURCE} aggregate UTF-16 code units; reduce scopes in this source.`
+          : "Snippet file scopes could not be measured safely; reduce or correct scopes in this source.";
+      const diagnostic = new vscode.Diagnostic(
+        positions.wholeDocumentRange(),
+        message,
+        vscode.DiagnosticSeverity.Error,
+      );
+      diagnostic.source = DIAGNOSTIC_SOURCE;
+      diagnostic.code = "$";
+      this.log(
+        `[registry] ${source.uri.toString(true)} exceeds source scope limits; keeping last-known-good snippets.`,
+      );
+      return { diagnostic_did: [diagnostic], keepLastKnownGood: true };
     }
 
     const snippet_sid: RegisteredSnippet[] = compiled.snippet_sid.map((snippet) => {
@@ -694,7 +721,18 @@ export class SnippetRegistry implements vscode.Disposable {
         source,
       };
     });
-    this.addDuplicatePrefixDiagnostics(positions, root, snippet_sid, diagnostic_did);
+    const conflictExhaustionDiagnostic = this.addDuplicatePrefixDiagnostics(
+      positions,
+      root,
+      snippet_sid,
+      diagnostic_did,
+    );
+    if (conflictExhaustionDiagnostic !== undefined) {
+      this.log(
+        `[registry] ${source.uri.toString(true)} exceeds duplicate-prefix indexing limits; keeping last-known-good snippets.`,
+      );
+      return { diagnostic_did: [conflictExhaustionDiagnostic], keepLastKnownGood: true };
+    }
     this.log(
       `[registry] Loaded ${snippet_sid.length} snippet(s) from ${sourceLabel(source)} source ${source.uri.toString(true)}.`,
     );
@@ -710,11 +748,24 @@ export class SnippetRegistry implements vscode.Disposable {
     root: JsonNode | undefined,
     snippet_sid: readonly RegisteredSnippet[],
     diagnostic_did: vscode.Diagnostic[],
-  ): void {
+  ): vscode.Diagnostic | undefined {
     const result = indexDuplicatePrefixConflicts(
       snippet_sid,
       MAX_DUPLICATE_PREFIX_WARNINGS,
     );
+    if (result.status === "exhausted") {
+      const message = result.reason === "workLimit"
+        ? `Duplicate-prefix indexing exceeds the limit of ${MAX_DUPLICATE_PREFIX_WORK_UNITS} work units; reduce prefixes or scopes in this source.`
+        : "Duplicate-prefix indexing received invalid or oversized normalized scopes; correct scopes in this source.";
+      const diagnostic = new vscode.Diagnostic(
+        positions.wholeDocumentRange(),
+        message,
+        vscode.DiagnosticSeverity.Error,
+      );
+      diagnostic.source = DIAGNOSTIC_SOURCE;
+      diagnostic.code = "$";
+      return diagnostic;
+    }
     for (const conflict of result.conflict_cid) {
       const snippet = snippet_sid[conflict.snippetIndex];
       const node = snippet === undefined || root === undefined
@@ -739,6 +790,7 @@ export class SnippetRegistry implements vscode.Disposable {
       diagnostic.source = DIAGNOSTIC_SOURCE;
       diagnostic_did.push(diagnostic);
     }
+    return undefined;
   }
 
   private async createFileIfAbsent(uri: vscode.Uri): Promise<void> {

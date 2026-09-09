@@ -1,4 +1,8 @@
-import type { CompiledSnippet } from "../core/index.js";
+import {
+  MAX_SCOPE_IDS_PER_SNIPPET,
+  MAX_SCOPE_TEXT_LENGTH_PER_SNIPPET,
+  type CompiledSnippet,
+} from "../core/index.js";
 
 /** Converts a native snippet prefix into a stable, duplicate-free array. */
 export function normalizePrefixes(prefix: string | readonly string[]): readonly string[] {
@@ -7,23 +11,60 @@ export function normalizePrefixes(prefix: string | readonly string[]): readonly 
 
 /**
  * Normalizes both VS Code's comma-separated scope syntax and scope arrays.
- * Empty scope values are ignored; an empty result therefore means "all languages".
+ * Omitted scope means "all languages". Supplied malformed or oversized values
+ * throw rather than being mistaken for global scope.
  */
 export function normalizeScopes(scope?: string | readonly string[]): readonly string[] {
   if (scope === undefined) {
     return [];
   }
 
-  const value_sid = typeof scope === "string" ? [scope] : scope;
+  const value_sid: readonly unknown[] = typeof scope === "string"
+    ? [scope]
+    : Array.isArray(scope)
+      ? scope
+      : [];
+  if (value_sid.length === 0 || value_sid.length > MAX_SCOPE_IDS_PER_SNIPPET) {
+    throw new RangeError("Scope must be a bounded, non-empty string or string array.");
+  }
+
+  let textLength = 0;
+  for (const value of value_sid as readonly string[]) {
+    if (typeof value !== "string") {
+      throw new TypeError("Scope arrays may contain only strings.");
+    }
+    textLength += value.length;
+    if (textLength > MAX_SCOPE_TEXT_LENGTH_PER_SNIPPET) {
+      throw new RangeError("Scope text exceeds the per-snippet limit.");
+    }
+  }
+
   const scope_lid: string[] = [];
   const seen = new Set<string>();
-  for (const value of value_sid) {
-    for (const part of value.split(",")) {
-      const languageId = part.trim();
-      if (languageId.length > 0 && !seen.has(languageId)) {
-        seen.add(languageId);
-        scope_lid.push(languageId);
+  let scopeIdCount = 0;
+  for (const value of value_sid as readonly string[]) {
+    let segmentStart = 0;
+    let valueHasScopeId = false;
+    for (let index = 0; index <= value.length; index += 1) {
+      if (value[index] !== undefined && value[index] !== ",") {
+        continue;
       }
+      const languageId = value.slice(segmentStart, index).trim();
+      if (languageId.length > 0) {
+        valueHasScopeId = true;
+        scopeIdCount += 1;
+        if (scopeIdCount > MAX_SCOPE_IDS_PER_SNIPPET) {
+          throw new RangeError("Scope ID count exceeds the per-snippet limit.");
+        }
+        if (!seen.has(languageId)) {
+          seen.add(languageId);
+          scope_lid.push(languageId);
+        }
+      }
+      segmentStart = index + 1;
+    }
+    if (!valueHasScopeId) {
+      throw new TypeError("Every scope string must contain a non-empty language ID.");
     }
   }
   return scope_lid;

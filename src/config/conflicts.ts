@@ -1,4 +1,12 @@
+import {
+  MAX_PREFIXES_PER_SNIPPET,
+  MAX_SCOPE_IDS_PER_SNIPPET,
+  MAX_SCOPE_TEXT_LENGTH_PER_SNIPPET,
+  MAX_SNIPPET_PREFIX_LENGTH,
+} from "../core/index.js";
+
 export const MAX_DUPLICATE_PREFIX_WARNINGS = 100;
+export const MAX_DUPLICATE_PREFIX_WORK_UNITS = 262_144;
 
 export interface PrefixScopeSnippet {
   readonly name: string;
@@ -13,10 +21,23 @@ export interface DuplicatePrefixConflict {
   readonly conflictingSnippetName: string;
 }
 
-export interface DuplicatePrefixConflictResult {
+export interface CompleteDuplicatePrefixConflictResult {
+  readonly status: "ok";
   readonly conflict_cid: readonly DuplicatePrefixConflict[];
   readonly omittedCount: number;
+  readonly workUnits: number;
 }
+
+export interface ExhaustedDuplicatePrefixConflictResult {
+  readonly status: "exhausted";
+  readonly reason: "invalidInput" | "workLimit";
+  readonly conflict_cid: readonly [];
+  readonly omittedCount: 0;
+  readonly workUnits: number;
+}
+
+export type DuplicatePrefixConflictResult = CompleteDuplicatePrefixConflictResult
+  | ExhaustedDuplicatePrefixConflictResult;
 
 interface IndexedSnippet {
   readonly name: string;
@@ -26,6 +47,59 @@ interface PrefixScopeIndex {
   readonly first: IndexedSnippet;
   global?: IndexedSnippet;
   readonly snippetByLanguage: Map<string, IndexedSnippet>;
+}
+
+function exhausted(
+  reason: ExhaustedDuplicatePrefixConflictResult["reason"],
+  workUnits: number,
+): ExhaustedDuplicatePrefixConflictResult {
+  return { status: "exhausted", reason, conflict_cid: [], omittedCount: 0, workUnits };
+}
+
+/** Computes the full indexing budget before any prefix or language maps exist. */
+function preflightIndexWork(
+  snippet_sid: readonly PrefixScopeSnippet[],
+  workLimit: number,
+): number | ExhaustedDuplicatePrefixConflictResult {
+  let workUnits = 0;
+  for (const snippet of snippet_sid) {
+    if (snippet === undefined
+      || typeof snippet.name !== "string"
+      || !Array.isArray(snippet.prefix_pid)
+      || !Array.isArray(snippet.scope_lid)
+      || snippet.prefix_pid.length === 0
+      || snippet.prefix_pid.length > MAX_PREFIXES_PER_SNIPPET
+      || snippet.scope_lid.length > MAX_SCOPE_IDS_PER_SNIPPET) {
+      return exhausted("invalidInput", workUnits);
+    }
+
+    let scopeTextLength = 0;
+    for (const prefix of snippet.prefix_pid) {
+      if (typeof prefix !== "string"
+        || prefix.length === 0
+        || prefix.length > MAX_SNIPPET_PREFIX_LENGTH) {
+        return exhausted("invalidInput", workUnits);
+      }
+    }
+    for (const languageId of snippet.scope_lid) {
+      if (typeof languageId !== "string" || languageId.length === 0) {
+        return exhausted("invalidInput", workUnits);
+      }
+      scopeTextLength += languageId.length;
+      if (scopeTextLength > MAX_SCOPE_TEXT_LENGTH_PER_SNIPPET) {
+        return exhausted("invalidInput", workUnits);
+      }
+    }
+
+    const scopeFactor = Math.max(1, snippet.scope_lid.length);
+    const remainingWork = workLimit - workUnits;
+    if (remainingWork < 0
+      || snippet.prefix_pid.length > Math.floor(remainingWork / 2 / scopeFactor)) {
+      return exhausted("workLimit", workLimit + 1);
+    }
+    workUnits += 2 * snippet.prefix_pid.length * scopeFactor;
+  }
+  return workUnits;
 }
 
 function findConflict(
@@ -71,10 +145,19 @@ function addToIndex(
 export function indexDuplicatePrefixConflicts(
   snippet_sid: readonly PrefixScopeSnippet[],
   maxWarnings = MAX_DUPLICATE_PREFIX_WARNINGS,
+  maxWorkUnits = MAX_DUPLICATE_PREFIX_WORK_UNITS,
 ): DuplicatePrefixConflictResult {
   const warningLimit = Number.isFinite(maxWarnings)
     ? Math.max(0, Math.floor(maxWarnings))
     : MAX_DUPLICATE_PREFIX_WARNINGS;
+  const workLimit = Number.isFinite(maxWorkUnits)
+    ? Math.max(0, Math.floor(maxWorkUnits))
+    : MAX_DUPLICATE_PREFIX_WORK_UNITS;
+  const preflight = preflightIndexWork(snippet_sid, workLimit);
+  if (typeof preflight !== "number") {
+    return preflight;
+  }
+
   const indexByPrefix = new Map<string, PrefixScopeIndex>();
   const conflict_cid: DuplicatePrefixConflict[] = [];
   let omittedCount = 0;
@@ -114,5 +197,5 @@ export function indexDuplicatePrefixConflicts(
     }
   }
 
-  return { conflict_cid, omittedCount };
+  return { status: "ok", conflict_cid, omittedCount, workUnits: preflight };
 }

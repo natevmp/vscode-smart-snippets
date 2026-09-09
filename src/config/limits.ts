@@ -1,5 +1,119 @@
+import {
+  MAX_SCOPE_IDS_PER_SNIPPET,
+  MAX_SCOPE_TEXT_LENGTH_PER_SNIPPET,
+  type CompiledSnippet,
+} from "../core/index.js";
+
 export const MAX_JSON_NESTING_DEPTH = 100;
 export const DEFAULT_MAX_PREFIXES_PER_SOURCE = 5_000;
+export const MAX_SCOPE_IDS_PER_SOURCE = 100_000;
+export const MAX_SCOPE_TEXT_LENGTH_PER_SOURCE = 262_144;
+
+export interface SourceScopeMetrics {
+  readonly status: "ok" | "scopeIdLimitExceeded" | "scopeTextLimitExceeded" | "invalid";
+  /** Exact when status is ok; otherwise bounded at or before the relevant limit plus one. */
+  readonly scopeIdCount: number;
+  /** Exact when status is ok; scope text exhaustion is represented by limit plus one. */
+  readonly scopeTextLength: number;
+}
+
+function countNonEmptyScopeIds(value: string, maximumCount: number): number {
+  let count = 0;
+  let segmentHasContent = false;
+  for (let index = 0; index <= value.length; index += 1) {
+    const character = value[index];
+    if (character === undefined || character === ",") {
+      if (segmentHasContent) {
+        count += 1;
+        if (count > maximumCount) {
+          return count;
+        }
+      }
+      segmentHasContent = false;
+    } else if (character.trim().length > 0) {
+      segmentHasContent = true;
+    }
+  }
+  return count;
+}
+
+/**
+ * Measures raw source scopes with early termination. Counts are conservative:
+ * duplicate non-empty comma-delimited IDs count separately.
+ */
+export function measureSourceScopeMetrics(
+  snippet_sid: readonly Pick<CompiledSnippet, "scope">[],
+  maximumScopeIds = MAX_SCOPE_IDS_PER_SOURCE,
+  maximumScopeTextLength = MAX_SCOPE_TEXT_LENGTH_PER_SOURCE,
+): SourceScopeMetrics {
+  const scopeIdLimit = Number.isFinite(maximumScopeIds)
+    ? Math.max(0, Math.floor(maximumScopeIds))
+    : MAX_SCOPE_IDS_PER_SOURCE;
+  const scopeTextLimit = Number.isFinite(maximumScopeTextLength)
+    ? Math.max(0, Math.floor(maximumScopeTextLength))
+    : MAX_SCOPE_TEXT_LENGTH_PER_SOURCE;
+  let scopeIdCount = 0;
+  let scopeTextLength = 0;
+
+  for (const snippet of snippet_sid) {
+    const scope = snippet.scope;
+    if (scope === undefined) {
+      continue;
+    }
+    const value_sid: readonly unknown[] = typeof scope === "string"
+      ? [scope]
+      : Array.isArray(scope)
+        ? scope
+        : [];
+    if (value_sid.length === 0 || value_sid.length > MAX_SCOPE_IDS_PER_SNIPPET) {
+      return { status: "invalid", scopeIdCount, scopeTextLength };
+    }
+
+    let snippetScopeTextLength = 0;
+    for (const value of value_sid) {
+      if (typeof value !== "string") {
+        return { status: "invalid", scopeIdCount, scopeTextLength };
+      }
+      snippetScopeTextLength += value.length;
+      if (snippetScopeTextLength > MAX_SCOPE_TEXT_LENGTH_PER_SNIPPET) {
+        return { status: "invalid", scopeIdCount, scopeTextLength };
+      }
+      if (scopeTextLength > scopeTextLimit
+        || value.length > scopeTextLimit - scopeTextLength) {
+        return {
+          status: "scopeTextLimitExceeded",
+          scopeIdCount,
+          scopeTextLength: scopeTextLimit + 1,
+        };
+      }
+      scopeTextLength += value.length;
+    }
+
+    let snippetScopeIdCount = 0;
+    for (const value of value_sid as readonly string[]) {
+      const valueCount = countNonEmptyScopeIds(
+        value,
+        Math.min(
+          scopeIdLimit - scopeIdCount,
+          MAX_SCOPE_IDS_PER_SNIPPET - snippetScopeIdCount,
+        ),
+      );
+      if (valueCount === 0) {
+        return { status: "invalid", scopeIdCount, scopeTextLength };
+      }
+      snippetScopeIdCount += valueCount;
+      if (snippetScopeIdCount > MAX_SCOPE_IDS_PER_SNIPPET) {
+        return { status: "invalid", scopeIdCount, scopeTextLength };
+      }
+      scopeIdCount += valueCount;
+      if (scopeIdCount > scopeIdLimit) {
+        return { status: "scopeIdLimitExceeded", scopeIdCount, scopeTextLength };
+      }
+    }
+  }
+
+  return { status: "ok", scopeIdCount, scopeTextLength };
+}
 
 /** Scans JSONC structure without recursing, ignoring braces inside strings and comments. */
 export function exceedsJsonNestingDepth(

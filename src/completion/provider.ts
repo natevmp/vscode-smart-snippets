@@ -10,35 +10,6 @@ import {
 
 const MAX_COMPLETION_ITEMS = 500;
 
-export interface PadInsertionSnapshot {
-  readonly snippetName: string;
-  readonly sourceUri: string;
-  readonly targetDocumentUri: string;
-  readonly targetDocumentVersion: number;
-  readonly driverTabstop: number;
-  readonly fill: string;
-  readonly targetWidth: number;
-}
-
-/** Creates a fresh, serialization-safe snapshot for dynamic insertion capture. */
-export function createPadInsertionSnapshot(
-  snippet: RegisteredSnippet,
-  targetDocument: Pick<vscode.TextDocument, "uri" | "version">,
-): PadInsertionSnapshot | undefined {
-  const pad = snippet.compiled.pad;
-  return pad === undefined
-    ? undefined
-    : {
-        snippetName: snippet.name,
-        sourceUri: snippet.source.uri.toString(),
-        targetDocumentUri: targetDocument.uri.toString(true),
-        targetDocumentVersion: targetDocument.version,
-        driverTabstop: pad.driverTabstop,
-        fill: pad.fill,
-        targetWidth: pad.targetWidth,
-      };
-}
-
 function itemKey(snippet: RegisteredSnippet, match: PrefixMatch): string {
   return [
     snippet.name,
@@ -111,7 +82,7 @@ export class SmartSnippetCompletionProvider implements vscode.CompletionItemProv
           },
           vscode.CompletionItemKind.Snippet,
         );
-        item.insertText = snippet.compiled.pad === undefined
+        item.insertText = snippet.compiled.pad_pid === undefined
           ? new vscode.SnippetString(snippet.compiled.body)
           : match.prefix;
         item.range = new vscode.Range(
@@ -129,7 +100,7 @@ export class SmartSnippetCompletionProvider implements vscode.CompletionItemProv
           match.prefix,
         ].join(":");
 
-        if (snippet.compiled.pad !== undefined && this.expandAtPrefixCommandId !== undefined) {
+        if (snippet.compiled.pad_pid !== undefined && this.expandAtPrefixCommandId !== undefined) {
           const options: ExpandAtPrefixCommandOptions = {
             requestValid: true,
             requestedSnippet: {

@@ -21,6 +21,12 @@ describe("configuration normalization", () => {
     assert.deepEqual(normalizeScopes(undefined), []);
   });
 
+  it("fails closed for malformed and oversized direct scope inputs", () => {
+    assert.throws(() => normalizeScopes(["julia", " , "]));
+    assert.throws(() => normalizeScopes(Array.from({ length: 257 }, () => "julia")));
+    assert.throws(() => normalizeScopes("x".repeat(4_097)));
+  });
+
   it("treats absent or empty scope as all languages", () => {
     assert.equal(isLanguageInScope("markdown", []), true);
     assert.equal(isLanguageInScope(" markdown ", ["markdown", "julia"]), true);

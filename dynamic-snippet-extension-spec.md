@@ -237,9 +237,7 @@ Example:
 "fill": "-"
 ```
 
-The fill value should ideally be a string rather than strictly a single character.
-
-This permits future usage such as:
+The fill value is a non-empty string that cannot contain tabs or newlines. This permits usage such as:
 
 ```json
 "fill": "- "
@@ -251,7 +249,7 @@ or:
 "fill": "·"
 ```
 
-For the MVP, supporting single-character fills is acceptable if it simplifies implementation.
+The string is repeated from its beginning and its final repetition is truncated at the required UTF-16 width. A cutoff may therefore split a supplementary Unicode character.
 
 ---
 
@@ -487,13 +485,27 @@ Core logic:
 availableWidth = targetWidth - lineWidthWithoutGeneratedPadding
 ```
 
-Then repeat the fill string until the appropriate width is reached.
+Then repeat the fill string and truncate its final repetition so the appropriate UTF-16 width is reached exactly.
 
 ---
 
 ## 12. Configuration Validation
 
 The extension should report useful errors for malformed definitions.
+
+Definitions containing active `${pad}` or `${pad:name}` tokens are dynamic snippets. They may use numeric placeholders and one-line numeric transforms, but must reject every numeric choice and native VS Code variable because those UI-driven transitions cannot be safely observed. A dynamic body must reject any CR not followed by LF because VS Code's treatment of lone CR as a snippet line break is not a stable documented contract; LF and CRLF remain supported. Every complete numeric tab-stop span must be free of actual CR and LF characters so source pad lines map stably to rendered lines. Source-adjacent, top-level positive numeric spans must also have the same identifier: public APIs cannot distinguish backward transitions between coincident distinct groups such as `$1$2`, including braced, default, and transform forms that may collapse to the same position. Same-ID mirrors remain valid. Definitions without active pad tokens remain static, and their bodies, including lone CR, are passed to VS Code unchanged.
+
+Untrusted source validation is bounded: snippet names are limited to 256 UTF-16 code units, definitions to 16 own enumerable properties, pad configurations to 8, and named-pad maps to 128 entries. More than 128 named pads stops entry validation immediately. Every static or dynamic snippet may supply at most 256 non-empty comma-delimited scope IDs before deduplication and 4,096 aggregate UTF-16 code units of scope strings. Scope validation scans delimiters within those bounds rather than first materializing an unrestricted split, and every supplied scalar/array string must contain a non-empty ID. Parse and compile share a source-wide budget of 100 semantic diagnostics, including one final omission summary, and 65,536 aggregate UTF-16 code units across retained paths and messages. Individual paths and messages are truncated visibly to 512 and 1,024 code units. An omitted error must produce an error-severity summary so source errors continue to preserve last-known-good snippets.
+
+Before publishing a source snapshot, the registry permits at most 100,000 raw non-empty comma-delimited scope IDs, counted before normalization or deduplication, and 262,144 aggregate UTF-16 code units in supplied scope strings. Measurement stops as soon as either limit is exceeded. Duplicate-prefix indexing independently preflights a conservative budget of `2 * prefixCount * max(1, normalizedScopeCount)` per snippet and rejects the entire index above 262,144 work units. Either source-level exhaustion produces one whole-document error and retains the last-known-good snapshot; no partial normalized snapshot or conflict result is published. The existing cap of 100 retained duplicate-prefix warnings applies when indexing is within budget.
+
+Before exact-prefix insertion, dynamic snippets must also satisfy resource and range checks:
+
+- A conservative initial-render bound across all cursors must not exceed 1,048,576 UTF-16 code units. Each cursor captures resolved editor `indentSize` and `insertSpaces`; `indentSize` must be a positive safe integer no greater than 1,048,576 and `insertSpaces` must be boolean. For each cursor, body and transform spans are widened by `tabCount * (indentSize - 1) + lineBreakCount * (targetEolWidth - 1)`. Every tab is widened even though native normalization only affects leading whitespace; this intentional overbound handles `insertSpaces: true` and remains safe when it is false. The bound starts with that widened body, allows each ordinary numeric occurrence to emit another widened body, and bounds each numeric transform by a widened unmatched input plus up to `widenedBody + 1` replacements, each containing its widened source span and one widened body per `$` format reference. Finally, `widenedInsertionIndent * (sourceLineBreakCount + 1)` is added. Cursor bounds are summed with limit-aware arithmetic.
+- For each driver group, its maximum generated-change count multiplied by every retained pad range, every selection range that can have been remembered by that point, and every retained predicted terminal endpoint must not exceed the shared offset-tracking work limit.
+- Intended multicursor ranges are copied and sorted before insertion. Every range end must be within the pre-insertion document length, starts must be distinct, ranges must not overlap, and the sum of gaps `current.start - previous.end` must not exceed 1,048,576 UTF-16 code units.
+
+Failure of either pre-insertion check must abort without calling native snippet insertion. A capture or finalization failure observed after a successful native insertion must not undo that insertion.
 
 Examples:
 
@@ -568,13 +580,11 @@ A future release may support display-column-aware width calculation.
 
 ## 14. Multiple Dynamic Placeholders
 
-Multiple pads do not need to be supported in the first MVP, but the architecture should not prevent them.
-
-Possible future syntax:
+Multiple pads are supported. A snippet may retain the default `${pad}`/`pad` pair and may also define named pads:
 
 ```text
-${pad:left}
-${pad:right}
+$1 heading${pad:left}
+${1} mirrored heading${pad:right}
 ```
 
 with configuration:
@@ -592,7 +602,11 @@ with configuration:
 }
 ```
 
-Do not implement this unless it falls out naturally from the initial architecture.
+Each token must end its source line. Its driver is the nearest preceding positive numeric tab stop on that line. Pads sharing a mirrored tab-stop number are evaluated together when that native tab stop is left.
+
+Current-group attribution is bounded, order-independent, and duplicate-preserving. Any mixed current/moved result or unsafe attribution discards pending dynamic state before evaluation on both command and best-effort selection-event paths. A complete valid-cardinality move with no selection attributable to the current group remains observable, including movement to an arbitrary explicit `$0`; best-effort navigation may evaluate and terminate when an unobserved destination cannot be identified. Previously observed and nonterminal transitions require valid selection cardinality. If terminal selection cardinality collapses, or every survivor remains attributable to the last positive group without owning its remembered selection group, every survivor must be zero-width and match a captured, currently rebased terminal endpoint.
+
+Terminal endpoints are retained only when the compiled body has no parsed `$0` (the implicit final), or exactly one complete top-level zero-width `$0`/`${0}` whose source span ends the body. Multiple or nested zero tab stops, zero defaults, choices, transforms, and explicit finals before trailing source do not produce endpoints. Surviving multicursor selections may collapse, so each selection must match an endpoint without requiring every endpoint to remain represented. This limited exception preserves co-located final exits such as `$1${pad}` while arbitrary partial or collapsed movement fails closed.
 
 ---
 
@@ -714,6 +728,7 @@ The first working version should support:
   - etc.
   - `$0`
 - `${pad}`.
+- Multiple `${pad}` and `${pad:name}` placeholders.
 - Per-snippet:
   - `pad.fill`
   - `pad.targetWidth`
@@ -734,7 +749,6 @@ Do not initially implement:
 - Arbitrary arithmetic expressions inside snippets.
 - JavaScript execution from configuration.
 - Live padding on every keystroke.
-- Multiple named pad placeholders.
 - Pixel-based visual alignment.
 - Sophisticated Unicode display-width handling.
 - Prefix arguments such as `#h1:100`.

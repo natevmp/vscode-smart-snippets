@@ -6,7 +6,17 @@ import {
   isExactPrefixAtBoundary,
 } from "./exactMatching.js";
 import type { RequestedExactExpansion } from "./expansionRequest.js";
-import { createPadInsertionSnapshot } from "./provider.js";
+import {
+  MAX_INSERTION_INDENT_CODE_UNITS,
+  MAX_PLANNED_RENDERED_CODE_UNITS,
+  MAX_RETAINED_OBSERVED_CHANGE_TEXT_CODE_UNITS,
+  MAX_RENDERING_INDENT_SIZE,
+  createInsertionCapturePlan,
+  finalizeInsertionCapture,
+  type InsertionContentChange,
+  type InsertionDocumentEvent,
+  type InsertionReplacementContext,
+} from "./insertionCapture.js";
 
 export const EXACT_PREFIX_AVAILABLE_CONTEXT = "smartSnippets.exactPrefixAvailable";
 const PREFIX_TAB_EXPANSION_SETTING = "enablePrefixTabExpansion";
@@ -21,6 +31,61 @@ interface ExactPrefixExpansion {
   readonly snippet: RegisteredSnippet;
   readonly prefix: string;
   readonly replacement_rid: readonly vscode.Range[];
+}
+
+function resolveReplacementContexts(
+  editor: vscode.TextEditor,
+  replacement_rid: readonly vscode.Range[],
+): readonly InsertionReplacementContext[] | undefined {
+  const { document } = editor;
+  const indentSize = editor.options.indentSize;
+  const insertSpaces = editor.options.insertSpaces;
+  if (typeof indentSize !== "number"
+    || !Number.isSafeInteger(indentSize)
+    || indentSize <= 0
+    || indentSize > MAX_RENDERING_INDENT_SIZE
+    || typeof insertSpaces !== "boolean") {
+    return undefined;
+  }
+  const targetEolWidth = document.eol === vscode.EndOfLine.LF
+    ? 1
+    : document.eol === vscode.EndOfLine.CRLF ? 2 : undefined;
+  if (targetEolWidth === undefined) {
+    return undefined;
+  }
+
+  const context_rid: InsertionReplacementContext[] = [];
+  let retainedIndentCodeUnits = 0;
+  for (const range of replacement_rid) {
+    const indentScanEnd = new vscode.Position(
+      range.start.line,
+      Math.min(range.start.character, MAX_INSERTION_INDENT_CODE_UNITS + 1),
+    );
+    const linePrefix = document.getText(new vscode.Range(
+      new vscode.Position(range.start.line, 0),
+      indentScanEnd,
+    ));
+    const insertionIndent = /^[ \t]*/u.exec(linePrefix)?.[0];
+    if (insertionIndent === undefined
+      || insertionIndent.length > MAX_INSERTION_INDENT_CODE_UNITS) {
+      return undefined;
+    }
+    if (insertionIndent.length
+      > MAX_PLANNED_RENDERED_CODE_UNITS - retainedIndentCodeUnits) {
+      return undefined;
+    }
+    retainedIndentCodeUnits += insertionIndent.length;
+    const rangeOffset = document.offsetAt(range.start);
+    context_rid.push({
+      rangeOffset,
+      rangeLength: document.offsetAt(range.end) - rangeOffset,
+      targetEolWidth,
+      indentSize,
+      insertSpaces,
+      insertionIndent,
+    });
+  }
+  return context_rid;
 }
 
 /** Resolves complete configured prefixes and inserts them through native snippet mode. */
@@ -75,10 +140,67 @@ export class ExactPrefixExpansionController implements vscode.Disposable {
       return false;
     }
 
-    const snapshot = createPadInsertionSnapshot(
-      expansion.snippet,
-      expansion.editor.document,
-    );
+    const targetDocument = expansion.editor.document;
+    const targetDocumentUri = targetDocument.uri.toString(true);
+    const dynamic = expansion.snippet.compiled.pad_pid !== undefined;
+    let planResult: ReturnType<typeof createInsertionCapturePlan> | undefined;
+    if (dynamic) {
+      const replacement_rid = resolveReplacementContexts(
+        expansion.editor,
+        expansion.replacement_rid,
+      );
+      if (replacement_rid === undefined) {
+        this.log(`Could not determine safe rendering context for '${expansion.snippet.name}'.`);
+        return false;
+      }
+      planResult = createInsertionCapturePlan({
+        snippetName: expansion.snippet.name,
+        sourceUri: expansion.snippet.source.uri.toString(true),
+        targetDocumentUri,
+        targetDocumentVersion: targetDocument.version,
+        targetDocumentLength: targetDocument.offsetAt(
+          new vscode.Position(targetDocument.lineCount, 0),
+        ),
+        compiled: expansion.snippet.compiled,
+        replacement_rid,
+      });
+    }
+    if (planResult !== undefined && !planResult.success) {
+      this.log(`Could not plan dynamic insertion for '${expansion.snippet.name}': ${planResult.reason}`);
+      return false;
+    }
+    let observedEvent: InsertionDocumentEvent | undefined;
+    let eventAmbiguousOrOverflow = false;
+    const captureListener = planResult?.success === true
+      ? vscode.workspace.onDidChangeTextDocument((event) => {
+          if (event.document === targetDocument) {
+            if (observedEvent !== undefined || eventAmbiguousOrOverflow
+              || event.contentChanges.length !== planResult.value.replacement_rid.length) {
+              eventAmbiguousOrOverflow = true;
+              return;
+            }
+            const change_cid: InsertionContentChange[] = [];
+            let retainedObservedCodeUnits = 0;
+            for (const change of event.contentChanges) {
+              if (change.text.length
+                > MAX_RETAINED_OBSERVED_CHANGE_TEXT_CODE_UNITS - retainedObservedCodeUnits) {
+                eventAmbiguousOrOverflow = true;
+                return;
+              }
+              retainedObservedCodeUnits += change.text.length;
+              change_cid.push({
+                rangeOffset: change.rangeOffset,
+                rangeLength: change.rangeLength,
+                text: change.text,
+              });
+            }
+            observedEvent = {
+              targetDocumentVersion: event.document.version,
+              change_cid,
+            };
+          }
+        })
+      : undefined;
     let inserted: boolean;
     try {
       inserted = await expansion.editor.insertSnippet(
@@ -88,15 +210,28 @@ export class ExactPrefixExpansionController implements vscode.Disposable {
     } catch (error: unknown) {
       this.log(`Failed to insert exact prefix '${expansion.prefix}': ${String(error)}`);
       return false;
+    } finally {
+      captureListener?.dispose();
     }
     if (!inserted) {
       this.log(`VS Code rejected exact-prefix insertion for '${expansion.snippet.name}'.`);
       return false;
     }
 
-    if (snapshot !== undefined) {
+    if (planResult?.success === true) {
+      const finalized = finalizeInsertionCapture(planResult.value, {
+        insertionSucceeded: true,
+        targetDocumentUri: expansion.editor.document.uri.toString(true),
+        targetDocumentVersion: expansion.editor.document.version,
+        event: observedEvent,
+        eventAmbiguousOrOverflow,
+      });
+      if (!finalized.success) {
+        this.log(`Could not capture dynamic insertion for '${expansion.snippet.name}': ${finalized.reason}`);
+        return true;
+      }
       try {
-        if (!this.captureInsertion(snapshot, expansion.editor)) {
+        if (!this.captureInsertion(finalized.value, expansion.editor)) {
           this.log(`Could not capture dynamic insertion for '${expansion.snippet.name}'.`);
         }
       } catch (error: unknown) {

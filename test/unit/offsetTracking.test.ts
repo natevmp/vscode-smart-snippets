@@ -2,9 +2,14 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import {
+  isOffsetTrackingWorkWithinLimit,
+  prepareContentChanges,
   rebaseOffset,
+  rebaseOffsetWithPreparedChanges,
   rebaseProtectedRange,
+  rebaseProtectedRangeWithPreparedChanges,
   rebaseRange,
+  rebaseRangeWithPreparedChanges,
   type ContentChange,
 } from "../../src/core/index.js";
 
@@ -83,6 +88,41 @@ describe("offset tracking", () => {
     assert.equal(result.valid, false);
     if (!result.valid) {
       assert.equal(result.reason, "invalid-change-set");
+    }
+  });
+
+  it("reuses one prepared change set with the public offset and range semantics", () => {
+    const laterChange = { rangeOffset: 10, rangeLength: 2, text: "X" };
+    const change_cid: ContentChange[] = [
+      laterChange,
+      { rangeOffset: 2, rangeLength: 1, text: "long" },
+    ];
+    const prepared = prepareContentChanges(change_cid);
+    laterChange.text = "mutated";
+
+    assert.equal(rebaseOffsetWithPreparedChanges(15, prepared, "right"), 17);
+    assert.deepEqual(
+      rebaseRangeWithPreparedChanges({ start: 6, end: 9 }, prepared),
+      { start: 9, end: 12 },
+    );
+    assert.deepEqual(
+      rebaseProtectedRangeWithPreparedChanges({ start: 6, end: 9 }, prepared),
+      { valid: true, range: { start: 9, end: 12 } },
+    );
+    assert.equal(isOffsetTrackingWorkWithinLimit(512, prepared), true);
+    assert.equal(isOffsetTrackingWorkWithinLimit(600_000, prepared), false);
+  });
+
+  it("preserves original event indices in prepared protected-range failures", () => {
+    const prepared = prepareContentChanges([
+      { rangeOffset: 20, rangeLength: 0, text: "later" },
+      { rangeOffset: 7, rangeLength: 0, text: "inside" },
+    ]);
+    const result = rebaseProtectedRangeWithPreparedChanges({ start: 5, end: 10 }, prepared);
+    assert.equal(result.valid, false);
+    if (!result.valid) {
+      assert.equal(result.reason, "protected-range-overlap");
+      assert.equal(result.changeIndex, 1);
     }
   });
 });

@@ -14,12 +14,14 @@ describe("config registry duplicate-prefix indexing", () => {
     ]);
 
     assert.deepEqual(result, {
+      status: "ok",
       conflict_cid: [
         { snippetIndex: 2, prefix: "shared", conflictingSnippetName: "Julia" },
         { snippetIndex: 3, prefix: "shared", conflictingSnippetName: "Julia" },
         { snippetIndex: 4, prefix: "shared", conflictingSnippetName: "Global" },
       ],
       omittedCount: 0,
+      workUnits: 12,
     });
   });
 
@@ -48,5 +50,43 @@ describe("config registry duplicate-prefix indexing", () => {
 
     assert.equal(result.conflict_cid.length, 2);
     assert.equal(result.omittedCount, 1);
+  });
+
+  it("accepts the exact work boundary and exhausts without partial conflicts one over", () => {
+    const snippet_sid = [
+      { name: "First", prefix_pid: ["same"], scope_lid: ["julia", "markdown"] },
+      { name: "Second", prefix_pid: ["same"], scope_lid: ["julia", "markdown"] },
+    ];
+    const atLimit = indexDuplicatePrefixConflicts(snippet_sid, 100, 8);
+    assert.equal(atLimit.status, "ok");
+    assert.equal(atLimit.workUnits, 8);
+    assert.equal(atLimit.conflict_cid.length, 1);
+
+    const overLimit = indexDuplicatePrefixConflicts([
+      ...snippet_sid,
+      { name: "Third", prefix_pid: ["same"], scope_lid: [] },
+    ], 100, 8);
+    assert.deepEqual(overLimit, {
+      status: "exhausted",
+      reason: "workLimit",
+      conflict_cid: [],
+      omittedCount: 0,
+      workUnits: 9,
+    });
+  });
+
+  it("fails closed before indexing oversized direct arrays", () => {
+    const result = indexDuplicatePrefixConflicts([{
+      name: "Oversized",
+      prefix_pid: ["x"],
+      scope_lid: Array.from({ length: 257 }, () => "julia"),
+    }]);
+    assert.deepEqual(result, {
+      status: "exhausted",
+      reason: "invalidInput",
+      conflict_cid: [],
+      omittedCount: 0,
+      workUnits: 0,
+    });
   });
 });
