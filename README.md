@@ -2,6 +2,8 @@
 
 Smart Snippets adds computed placeholders to native-feeling Visual Studio Code snippets. `${pad}` and `${pad:name}` fill the rest of their lines to configured widths when you leave their driving tab stops.
 
+Smart Snippets requires Visual Studio Code 1.100 or later.
+
 ## Configure snippets
 
 Run either command from the Command Palette:
@@ -101,13 +103,15 @@ Each configuration source is limited to 1 MiB, 2,000 snippets, 5,000 prefixes, 1
 
 ## Development
 
-Development requires Node.js 22.13.x or Node.js 24 and later. Node.js 24 LTS is recommended.
+Development requires Node.js 22.13 or later in the 22.x line, or Node.js 24 and later. Node.js 24 LTS is recommended. Use npm 11.19.x so the repository's lifecycle-script policy is enforced.
 
 ```sh
-npm install
+npm ci
 npm run build
 npm run test:unit
 npm run test:vscode
 ```
 
-Set `VSCODE_TEST_VERSION` to exercise a specific compatible release, for example `VSCODE_TEST_VERSION=1.90.0 npm run test:vscode`.
+`npm ci` enforces the exact lifecycle-script decisions in `package.json`; current dependency installers are skipped, and a new or changed script fails closed. See [SECURITY.md](SECURITY.md) before approving one.
+
+Run `npm run verify` for the local audit, lint, type-check, build, and unit-test checks. Set `VSCODE_TEST_VERSION` to exercise a specific compatible release, for example `VSCODE_TEST_VERSION=1.100.0 npm run test:vscode`.

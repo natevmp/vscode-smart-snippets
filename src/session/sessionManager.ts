@@ -335,7 +335,7 @@ export class SmartSnippetSessionManager implements vscode.Disposable {
       return;
     }
     let session: EditorSession | undefined;
-    let pendingPad_pid: readonly TrackedPad[] = [];
+    let pendingPad_pid: readonly TrackedPad[];
     try {
       session = editor === undefined ? undefined : this.getCurrentSession(editor);
       if (session !== undefined

@@ -1,8 +1,7 @@
 import path from "node:path";
 
-import Mocha from "mocha";
-
 export async function run(): Promise<void> {
+  const { default: Mocha } = await import("mocha");
   const mocha = new Mocha({
     color: true,
     timeout: 20_000,

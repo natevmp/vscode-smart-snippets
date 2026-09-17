@@ -2,7 +2,8 @@
   "name": "smart-snippets",
   "displayName": "Smart Snippets",
   "description": "Native-feeling VS Code snippets with computed placeholders.",
-  "version": "0.2.0",
+  "version": "0.3.0",
+  "private": true,
   "publisher": "smart-snippets",
   "license": "MIT",
   "homepage": "https://github.com/natevmp/vscode-smart-snippets#readme",
@@ -13,9 +14,22 @@
     "type": "git",
     "url": "https://github.com/natevmp/vscode-smart-snippets.git"
   },
+  "packageManager": "npm@11.19.0",
   "engines": {
-    "vscode": "^1.90.0",
+    "vscode": "^1.100.0",
     "node": "^22.13.0 || >=24"
+  },
+  "devEngines": {
+    "runtime": {
+      "name": "node",
+      "version": "^22.13.0 || >=24",
+      "onFail": "error"
+    },
+    "packageManager": {
+      "name": "npm",
+      "version": "11.19.x",
+      "onFail": "error"
+    }
   },
   "categories": [
     "Snippets",
@@ -107,23 +121,31 @@
     "compile-tests": "tsc -p tsconfig.test.json",
     "test:vscode": "npm run build && npm run compile-tests && node out/test/integration/runTest.js",
     "test": "npm run test:unit && npm run test:vscode",
+    "security:audit": "npm audit --audit-level=low",
+    "security:audit:runtime": "npm audit --omit=dev --audit-level=low",
+    "verify": "npm run security:audit:runtime && npm run security:audit && npm run lint && npm run build && npm run test:unit",
     "package": "npm run build && vsce package"
   },
   "dependencies": {
     "jsonc-parser": "^3.3.1"
   },
   "devDependencies": {
-    "@eslint/js": "^9.35.0",
+    "@eslint/js": "^10.0.1",
     "@types/mocha": "^10.0.10",
-    "@types/node": "^22.18.0",
-    "@types/vscode": "^1.90.0",
-    "@vscode/test-electron": "^2.5.2",
-    "@vscode/vsce": "^3.6.0",
-    "esbuild": "^0.25.9",
-    "eslint": "^9.35.0",
-    "mocha": "^11.7.2",
+    "@types/node": "^22.20.3",
+    "@types/vscode": "1.100.0",
+    "@vscode/test-electron": "^3.1.0",
+    "@vscode/vsce": "^4.0.0",
+    "esbuild": "^0.28.2",
+    "eslint": "^10.10.0",
+    "mocha": "^12.0.1",
     "tsx": "^4.20.5",
     "typescript": "^5.9.2",
-    "typescript-eslint": "^8.42.0"
+    "typescript-eslint": "^8.70.0"
+  },
+  "allowScripts": {
+    "@vscode/vsce-sign@2.1.0": false,
+    "esbuild@0.28.2": false,
+    "fsevents@2.3.3": false
   }
 }

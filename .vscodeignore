@@ -1,5 +1,6 @@
 .github/**
 .gitignore
+.npmrc
 .node-version
 .vscode-test/**
 node_modules/**

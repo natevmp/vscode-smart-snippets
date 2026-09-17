@@ -1,6 +1,9 @@
 # Changelog
 
-## Unreleased
+## 0.3.0
+
+- Require VS Code 1.100 or later so the integration test runner can use patched, supported development dependencies.
+- Upgrade the lint, test, build, and packaging toolchain; enforce reviewed npm lifecycle scripts and automated dependency audits.
 
 ## 0.2.0
 
